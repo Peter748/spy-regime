@@ -4,406 +4,534 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SPY Regime Chart</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/recharts/2.8.0/Recharts.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: #0d1117; color: #e6edf3; font-family: 'JetBrains Mono', 'Courier New', monospace; }
-  ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: #0d1117; }
-  ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
-  button:hover { opacity: 0.85; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: #0d1117; color: #e6edf3;
+  font-family: 'Courier New', monospace;
+  padding: 24px 20px; min-height: 100vh;
+}
+h1 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+.sub { font-size: 11px; color: #484f58; margin-bottom: 20px; }
+.top-bar {
+  display: flex; align-items: center; gap: 16px;
+  background: #161b22; border: 1px solid #21262d;
+  border-radius: 8px; padding: 14px 18px; margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+.metric { min-width: 90px; }
+.metric .label { font-size: 10px; color: #484f58; margin-bottom: 3px; }
+.metric .value { font-size: 18px; font-weight: 700; }
+.metric .small { font-size: 13px; font-weight: 600; }
+.pill {
+  display: inline-block; border-radius: 20px;
+  padding: 4px 12px; font-size: 12px; font-weight: 700;
+  border: 1px solid; margin-left: 12px; vertical-align: middle;
+}
+.stats { display: flex; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; }
+.stat-card {
+  flex: 1; min-width: 120px; border-radius: 8px;
+  padding: 10px 14px; border: 1px solid;
+}
+.stat-card .s-label { font-size: 10px; color: #484f58; margin-bottom: 3px; }
+.stat-card .s-val { font-size: 20px; font-weight: 700; }
+.stat-card .s-sub { font-size: 10px; color: #484f58; }
+.controls {
+  display: flex; gap: 6px; margin-bottom: 16px;
+  flex-wrap: wrap; align-items: center;
+}
+button {
+  background: #161b22; color: #666;
+  border: 1px solid #21262d; border-radius: 6px;
+  padding: 6px 13px; cursor: pointer;
+  font-family: 'Courier New', monospace;
+  font-size: 11px; font-weight: 700;
+  transition: all 0.15s;
+}
+button.active { background: #f0a50022; color: #f0a500; border-color: #f0a500; }
+button.active-blue { background: #60a5fa22; color: #60a5fa; border-color: #60a5fa; }
+button.active-green { background: #00d68f22; color: #00d68f; border-color: #00d68f; }
+button:hover { opacity: 0.8; }
+.chart-wrap {
+  background: #0d1117; border: 1px solid #21262d;
+  border-radius: 12px; padding: 16px; margin-bottom: 16px;
+  position: relative;
+}
+#loading {
+  position: absolute; inset: 0; display: flex;
+  align-items: center; justify-content: center;
+  flex-direction: column; gap: 12px; background: #0d1117;
+  border-radius: 12px; z-index: 10;
+}
+.spinner {
+  width: 32px; height: 32px; border: 3px solid #21262d;
+  border-top-color: #f0a500; border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.error-box {
+  background: #ff4d6d11; border: 1px solid #ff4d6d44;
+  border-radius: 8px; padding: 16px; color: #ff4d6d;
+  font-size: 12px; margin-bottom: 16px; display: none;
+}
+.footer { font-size: 10px; color: #30363d; text-align: center; margin-top: 12px; }
+.year-btns { display: flex; gap: 5px; flex-wrap: wrap; }
+.view-btns { display: flex; gap: 5px; margin-left: 12px; }
+.gran-btns { display: flex; gap: 5px; margin-left: auto; }
+canvas { max-height: 400px; }
 </style>
 </head>
 <body>
-<div id="root"></div>
 
-<script type="text/babel">
-const { useState, useEffect, useMemo, useCallback } = React;
-const { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid,
-        Tooltip, Legend, ResponsiveContainer, Cell } = Recharts;
+<h1>SPY Market Regime 
+  <span id="regime-pill" class="pill" style="display:none"></span>
+</h1>
+<div class="sub">Real SPY data · EMA(20) + EMA(50) + ADX(14) · Same algorithm as your trading bot</div>
 
-// ── Regime detection (identical to your bot) ──────────────────────────────────
-function calcEMA(values, period) {
-  const k = 2 / (period + 1);
-  const result = new Array(values.length).fill(null);
-  let sum = 0, count = 0;
-  for (let i = 0; i < values.length; i++) {
-    if (values[i] == null) continue;
-    if (count < period) { sum += values[i]; count++; if (count === period) result[i] = sum / period; }
-    else { result[i] = values[i] * k + result[i-1] * (1-k); }
+<div class="error-box" id="error-box"></div>
+
+<div class="top-bar" id="top-bar" style="display:none">
+  <div class="metric">
+    <div class="label">LAST CLOSE</div>
+    <div class="value" id="m-price">-</div>
+  </div>
+  <div class="metric">
+    <div class="label">CHANGE</div>
+    <div class="small" id="m-change">-</div>
+  </div>
+  <div class="metric">
+    <div class="label">EMA 20</div>
+    <div class="small" style="color:#60a5fa" id="m-ema20">-</div>
+  </div>
+  <div class="metric">
+    <div class="label">EMA 50</div>
+    <div class="small" style="color:#a78bfa" id="m-ema50">-</div>
+  </div>
+  <div class="metric">
+    <div class="label">ADX (14)</div>
+    <div class="small" style="color:#fb923c" id="m-adx">-</div>
+  </div>
+  <div class="metric" style="margin-left:auto">
+    <div class="label">BOT STRATEGY</div>
+    <div class="small" id="m-strategy">-</div>
+  </div>
+  <button onclick="loadData()" style="color:#60a5fa;border-color:#60a5fa44;margin-left:8px">↻ Refresh</button>
+</div>
+
+<div class="stats" id="stats-row" style="display:none">
+  <div class="stat-card" style="background:#00d68f12;border-color:#00d68f30">
+    <div class="s-label">🐂 BULL DAYS</div>
+    <div class="s-val" id="s-bull" style="color:#00d68f">-</div>
+    <div class="s-sub" id="s-bull-pct">Trend Following</div>
+  </div>
+  <div class="stat-card" style="background:#ff4d6d12;border-color:#ff4d6d30">
+    <div class="s-label">🐻 BEAR DAYS</div>
+    <div class="s-val" id="s-bear" style="color:#ff4d6d">-</div>
+    <div class="s-sub" id="s-bear-pct">Hold Cash</div>
+  </div>
+  <div class="stat-card" style="background:#f0a50012;border-color:#f0a50030">
+    <div class="s-label">〰️ CHOPPY DAYS</div>
+    <div class="s-val" id="s-choppy" style="color:#f0a500">-</div>
+    <div class="s-sub" id="s-choppy-pct">Mean Reversion</div>
+  </div>
+</div>
+
+<div class="controls">
+  <div class="year-btns" id="year-btns"></div>
+  <div class="view-btns">
+    <button id="btn-price" class="active-blue" onclick="setView('price')">Price Chart</button>
+    <button id="btn-regime" onclick="setView('regime')">Regime Days</button>
+  </div>
+  <div class="gran-btns">
+    <button id="btn-daily" class="active" onclick="setGran('daily')">Daily</button>
+    <button id="btn-monthly" onclick="setGran('monthly')">Monthly</button>
+  </div>
+</div>
+
+<div class="chart-wrap">
+  <div id="loading">
+    <div class="spinner"></div>
+    <div style="color:#484f58;font-size:12px">Fetching real SPY data...</div>
+  </div>
+  <canvas id="chart"></canvas>
+</div>
+
+<div class="footer">
+  Data: Yahoo Finance · Regime: EMA(20/50) + ADX(14) matching your bot's regime_detector.py
+</div>
+
+<script>
+// ── State ─────────────────────────────────────────────────────────────────────
+let allData = [];
+let chartInst = null;
+let currentView = 'price';
+let currentGran = 'daily';
+let currentYear = 'ALL';
+
+const C = { BULL:'#00d68f', BEAR:'#ff4d6d', CHOPPY:'#f0a500', UNKNOWN:'#444' };
+
+// ── Regime math (mirrors bot) ─────────────────────────────────────────────────
+function calcEMA(vals, period) {
+  const k = 2/(period+1), out = new Array(vals.length).fill(null);
+  let sum=0, cnt=0;
+  for (let i=0;i<vals.length;i++) {
+    if (vals[i]==null) continue;
+    if (cnt<period) { sum+=vals[i]; cnt++; if(cnt===period) out[i]=sum/period; }
+    else out[i]=vals[i]*k+out[i-1]*(1-k);
   }
-  return result;
+  return out;
 }
 
-function calcADX(highs, lows, closes, period = 14) {
-  const n = closes.length;
-  const result = new Array(n).fill(null);
-  const tr = [], pDM = [], mDM = [];
-  for (let i = 1; i < n; i++) {
-    tr.push(Math.max(highs[i]-lows[i], Math.abs(highs[i]-closes[i-1]), Math.abs(lows[i]-closes[i-1])));
-    const up = highs[i]-highs[i-1], dn = lows[i-1]-lows[i];
-    pDM.push(up > dn && up > 0 ? up : 0);
-    mDM.push(dn > up && dn > 0 ? dn : 0);
+function calcADX(H,L,C,p=14) {
+  const n=C.length, res=new Array(n).fill(null);
+  const tr=[],pDM=[],mDM=[];
+  for(let i=1;i<n;i++){
+    tr.push(Math.max(H[i]-L[i],Math.abs(H[i]-C[i-1]),Math.abs(L[i]-C[i-1])));
+    const u=H[i]-H[i-1],d=L[i-1]-L[i];
+    pDM.push(u>d&&u>0?u:0); mDM.push(d>u&&d>0?d:0);
   }
-  function wilder(arr, p) {
-    const out = new Array(arr.length).fill(null);
-    let s = arr.slice(0,p).reduce((a,b)=>a+b,0);
-    out[p-1] = s;
-    for (let i=p;i<arr.length;i++) out[i]=out[i-1]-out[i-1]/p+arr[i];
-    return out;
+  function ws(a,p){
+    const o=new Array(a.length).fill(null);
+    let s=a.slice(0,p).reduce((x,y)=>x+y,0); o[p-1]=s;
+    for(let i=p;i<a.length;i++) o[i]=o[i-1]-o[i-1]/p+a[i];
+    return o;
   }
-  const sTR=wilder(tr,period), sPDM=wilder(pDM,period), sMDM=wilder(mDM,period);
+  const sTR=ws(tr,p),sP=ws(pDM,p),sM=ws(mDM,p);
   const dx=[];
-  for (let i=period-1;i<sTR.length;i++) {
-    if (!sTR[i]) { dx.push(null); continue; }
-    const pdi=sPDM[i]/sTR[i]*100, mdi=sMDM[i]/sTR[i]*100;
-    dx.push((pdi+mdi)===0 ? 0 : Math.abs(pdi-mdi)/(pdi+mdi)*100);
+  for(let i=p-1;i<sTR.length;i++){
+    if(!sTR[i]){dx.push(0);continue;}
+    const pi=sP[i]/sTR[i]*100,mi=sM[i]/sTR[i]*100;
+    dx.push((pi+mi)===0?0:Math.abs(pi-mi)/(pi+mi)*100);
   }
-  let av=null, adxArr=[];
-  for (let i=0;i<dx.length;i++) {
-    if (i<period) { adxArr.push(null); continue; }
-    if (av===null) { av=dx.slice(0,period).reduce((a,b)=>a+(b||0),0)/period; adxArr.push(av); }
-    else { av=(av*(period-1)+(dx[i]||0))/period; adxArr.push(av); }
+  let av=null; const aa=[];
+  for(let i=0;i<dx.length;i++){
+    if(i<p){aa.push(null);continue;}
+    if(av===null){av=dx.slice(0,p).reduce((a,b)=>a+(b||0),0)/p; aa.push(av);}
+    else{av=(av*(p-1)+(dx[i]||0))/p; aa.push(av);}
   }
-  for (let i=0;i<adxArr.length;i++) if (i+1<n) result[i+1]=adxArr[i];
-  return result;
+  for(let i=0;i<aa.length;i++) if(i+1<n) res[i+1]=aa[i];
+  return res;
 }
 
-function classifyRegime(close, ema20, ema50, adxVal) {
-  if (!ema20||!ema50||!adxVal) return "UNKNOWN";
-  const pct=(close-ema50)/ema50*100;
-  if (adxVal>25) {
-    if (close>ema20&&close>ema50&&pct>3) return "BULL";
-    if (close<ema20&&close<ema50&&pct<-3) return "BEAR";
-    return "CHOPPY";
+function regime(close,e20,e50,adx){
+  if(!e20||!e50||!adx) return 'UNKNOWN';
+  const pct=(close-e50)/e50*100;
+  if(adx>25){
+    if(close>e20&&close>e50&&pct>3) return 'BULL';
+    if(close<e20&&close<e50&&pct<-3) return 'BEAR';
+    return 'CHOPPY';
   }
-  return "CHOPPY";
+  return 'CHOPPY';
 }
 
-// ── Colours ───────────────────────────────────────────────────────────────────
-const C = { BULL:"#00d68f", BEAR:"#ff4d6d", CHOPPY:"#f0a500", UNKNOWN:"#444" };
-
-// ── Fetch real SPY data via Yahoo Finance proxy ───────────────────────────────
-async function fetchSPY(period = "4y") {
-  // Yahoo Finance v8 chart endpoint (no API key needed)
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/SPY?interval=1d&range=${period}&events=history`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const json = await res.json();
-  const chart = json.chart.result[0];
-  const timestamps = chart.timestamp;
-  const q = chart.indicators.quote[0];
-  const rows = [];
-  for (let i=0;i<timestamps.length;i++) {
-    if (!q.close[i]) continue;
-    const d = new Date(timestamps[i]*1000);
-    rows.push({
-      date: d.toISOString().slice(0,10),
-      open:  +q.open[i].toFixed(2),
-      high:  +q.high[i].toFixed(2),
-      low:   +q.low[i].toFixed(2),
-      close: +q.close[i].toFixed(2),
-      volume: q.volume[i],
-    });
+// ── Fetch SPY ─────────────────────────────────────────────────────────────────
+async function fetchSPY() {
+  const base = 'https://query1.finance.yahoo.com/v8/finance/chart/SPY?interval=1d&range=4y&events=history';
+  const proxies = [
+    base,
+    'https://corsproxy.io/?url=' + encodeURIComponent(base),
+    'https://api.allorigins.win/raw?url=' + encodeURIComponent(base),
+  ];
+  for (const url of proxies) {
+    try {
+      const r = await fetch(url, {headers:{'Accept':'application/json'}});
+      if (!r.ok) continue;
+      const j = await r.json();
+      const result = j.chart?.result?.[0];
+      if (!result) continue;
+      const ts = result.timestamp;
+      const q  = result.indicators.quote[0];
+      const rows = [];
+      for (let i=0;i<ts.length;i++) {
+        if (!q.close[i]) continue;
+        const d = new Date(ts[i]*1000);
+        if (d.getDay()===0||d.getDay()===6) continue;
+        rows.push({
+          date:  d.toISOString().slice(0,10),
+          open:  +q.open[i].toFixed(2),
+          high:  +q.high[i].toFixed(2),
+          low:   +q.low[i].toFixed(2),
+          close: +q.close[i].toFixed(2),
+        });
+      }
+      if (rows.length > 50) return rows;
+    } catch(e) { console.warn('fetch failed:', url, e.message); }
   }
-  return rows;
+  throw new Error('All data sources blocked. Try running locally with: python -m http.server 8080');
 }
 
-// ── Tooltip ───────────────────────────────────────────────────────────────────
-function CustomTooltip({ active, payload }) {
-  if (!active||!payload?.length) return null;
-  const d = payload[0]?.payload;
-  if (!d||!d.regime) return null;
-  const icons = { BULL:"🐂", BEAR:"🐻", CHOPPY:"〰️", UNKNOWN:"❓" };
-  return (
-    <div style={{ background:"#0d1117", border:`1px solid ${C[d.regime]}`, borderRadius:8,
-                  padding:"10px 14px", fontSize:11, minWidth:170 }}>
-      <div style={{color:"#666",marginBottom:5}}>{d.date}</div>
-      <div style={{color:C[d.regime],fontWeight:700,fontSize:13,marginBottom:5}}>
-        {icons[d.regime]} {d.regime}
-      </div>
-      <div style={{color:"#ccc"}}>SPY <strong>${d.close?.toFixed(2)}</strong></div>
-      {d.ema20 && <div style={{color:"#60a5fa"}}>EMA20 ${d.ema20?.toFixed(2)}</div>}
-      {d.ema50 && <div style={{color:"#a78bfa"}}>EMA50 ${d.ema50?.toFixed(2)}</div>}
-      {d.adx   && <div style={{color:"#fb923c"}}>ADX {d.adx?.toFixed(1)}</div>}
-      {d.changeStr && <div style={{color:d.change>=0?"#00d68f":"#ff4d6d",marginTop:3}}>{d.changeStr}</div>}
-    </div>
-  );
+// ── Process raw rows into chart data ─────────────────────────────────────────
+function process(rows) {
+  const closes = rows.map(r=>r.close);
+  const highs  = rows.map(r=>r.high);
+  const lows   = rows.map(r=>r.low);
+  const e20 = calcEMA(closes,20);
+  const e50 = calcEMA(closes,50);
+  const adx = calcADX(highs,lows,closes,14);
+  return rows.map((r,i)=>{
+    const reg = regime(r.close,e20[i],e50[i],adx[i]);
+    const prev = i>0?rows[i-1].close:r.close;
+    const chg  = r.close-prev;
+    return { ...r, regime:reg, ema20:e20[i], ema50:e50[i], adx:adx[i],
+             change:chg, changePct:chg/prev*100 };
+  });
 }
 
-// ── Monthly aggregation ───────────────────────────────────────────────────────
+// ── Monthly rollup ────────────────────────────────────────────────────────────
 function toMonthly(data) {
-  const m = {};
-  data.forEach(d => {
-    const k = d.date.slice(0,7);
-    if (!m[k]) m[k]={date:k,bull:0,bear:0,choppy:0,close:0,ema20:null,ema50:null};
+  const m={};
+  data.forEach(d=>{
+    const k=d.date.slice(0,7);
+    if(!m[k]) m[k]={date:k,bull:0,bear:0,choppy:0,close:0,ema20:null,ema50:null};
     m[k].close=d.close; m[k].ema20=d.ema20; m[k].ema50=d.ema50;
-    if (d.regime==="BULL") m[k].bull++;
-    else if (d.regime==="BEAR") m[k].bear++;
+    if(d.regime==='BULL') m[k].bull++;
+    else if(d.regime==='BEAR') m[k].bear++;
     else m[k].choppy++;
   });
   return Object.values(m).sort((a,b)=>a.date.localeCompare(b.date));
 }
 
-// ── App ───────────────────────────────────────────────────────────────────────
-function App() {
-  const [raw, setRaw]       = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError]   = useState(null);
-  const [view, setView]     = useState("price");
-  const [gran, setGran]     = useState("daily");
-  const [yearF, setYearF]   = useState("ALL");
-  const [lastUpdate, setLastUpdate] = useState(null);
-
-  const load = useCallback(async () => {
-    setLoading(true); setError(null);
-    try {
-      const rows = await fetchSPY("4y");
-      const closes = rows.map(r=>r.close);
-      const highs  = rows.map(r=>r.high);
-      const lows   = rows.map(r=>r.low);
-      const ema20  = calcEMA(closes, 20);
-      const ema50  = calcEMA(closes, 50);
-      const adxArr = calcADX(highs, lows, closes, 14);
-
-      const processed = rows.map((r,i) => {
-        const regime = classifyRegime(r.close, ema20[i], ema50[i], adxArr[i]);
-        const prev = i>0 ? rows[i-1].close : r.close;
-        const change = r.close - prev;
-        return {
-          ...r,
-          regime,
-          ema20: ema20[i] ? +ema20[i].toFixed(2) : null,
-          ema50: ema50[i] ? +ema50[i].toFixed(2) : null,
-          adx:   adxArr[i] ? +adxArr[i].toFixed(1) : null,
-          bull:  regime==="BULL"  ? r.close : null,
-          bear:  regime==="BEAR"  ? r.close : null,
-          choppy:regime==="CHOPPY"? r.close : null,
-          change, changeStr: `${change>=0?"+":""}${change.toFixed(2)} (${(change/prev*100).toFixed(2)}%)`,
-        };
-      });
-      setRaw(processed);
-      setLastUpdate(new Date().toLocaleTimeString("en-AU"));
-    } catch(e) {
-      setError(e.message);
-    }
-    setLoading(false);
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
-
-  const filtered = useMemo(()=>{
-    if (yearF==="ALL") return raw;
-    return raw.filter(d=>d.date.startsWith(yearF));
-  },[raw,yearF]);
-
-  const displayData = useMemo(()=>{
-    const base = gran==="monthly" ? toMonthly(filtered) : filtered;
-    if (gran==="daily" && base.length>400) {
-      const step=Math.ceil(base.length/400);
-      return base.filter((_,i)=>i%step===0);
-    }
-    return base;
-  },[filtered,gran]);
-
-  const stats = useMemo(()=>{
-    const c={BULL:0,BEAR:0,CHOPPY:0};
-    filtered.forEach(d=>{if(c[d.regime]!==undefined)c[d.regime]++;});
-    const total=Object.values(c).reduce((a,b)=>a+b,0);
-    const latest=filtered[filtered.length-1];
-    return {...c,total,latest};
-  },[filtered]);
-
-  const years = useMemo(()=>{
-    const ys=new Set(raw.map(d=>d.date.slice(0,4)));
-    return ["ALL",...[...ys].sort()];
-  },[raw]);
-
-  // Styles
-  const btn = (active,color="#f0a500")=>({
-    background: active ? color+"33" : "#161b22",
-    color: active ? color : "#555",
-    border: `1px solid ${active?color:"#21262d"}`,
-    borderRadius:6, padding:"5px 12px", cursor:"pointer",
-    fontFamily:"inherit", fontSize:11, fontWeight:700, transition:"all 0.15s",
-  });
-
-  if (loading) return (
-    <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",flexDirection:"column",gap:16}}>
-      <div style={{fontSize:28,animation:"spin 1s linear infinite"}}>⚙️</div>
-      <div style={{color:"#484f58",fontSize:13}}>Fetching real SPY data from Yahoo Finance...</div>
-      <style>{`@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}`}</style>
-    </div>
-  );
-
-  if (error) return (
-    <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",flexDirection:"column",gap:12}}>
-      <div style={{color:"#ff4d6d",fontSize:16}}>⚠ Could not fetch SPY data</div>
-      <div style={{color:"#484f58",fontSize:12,maxWidth:400,textAlign:"center"}}>{error}</div>
-      <div style={{color:"#484f58",fontSize:11,maxWidth:400,textAlign:"center",marginTop:8}}>
-        Yahoo Finance may be blocking browser requests due to CORS. 
-        Try opening this file in Chrome and disabling CORS, or use the 
-        Python script version instead.
-      </div>
-      <button onClick={load} style={{...btn(true,"#00d68f"),marginTop:8,padding:"8px 20px"}}>Retry</button>
-    </div>
-  );
-
-  const latest = stats.latest;
-  const latestRegime = latest?.regime || "UNKNOWN";
-
-  return (
-    <div style={{minHeight:"100vh",padding:"24px 20px",maxWidth:1200,margin:"0 auto"}}>
-
-      {/* Header */}
-      <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:20,flexWrap:"wrap",gap:12}}>
-        <div>
-          <h1 style={{fontSize:20,fontWeight:700,marginBottom:2,letterSpacing:-0.5}}>
-            SPY Market Regime  
-            <span style={{
-              marginLeft:12, fontSize:12, background:C[latestRegime]+"22",
-              color:C[latestRegime], border:`1px solid ${C[latestRegime]}44`,
-              borderRadius:20, padding:"3px 10px", verticalAlign:"middle"
-            }}>
-              {latestRegime==="BULL"?"🐂 BULL":latestRegime==="BEAR"?"🐻 BEAR":"〰️ CHOPPY"} TODAY
-            </span>
-          </h1>
-          <div style={{fontSize:10,color:"#484f58"}}>
-            Real SPY data · EMA(20/50) + ADX(14) · Same algorithm as your trading bot
-            {lastUpdate && ` · Updated ${lastUpdate}`}
-          </div>
-        </div>
-        <button onClick={load} style={{...btn(false),padding:"7px 16px",color:"#60a5fa",borderColor:"#60a5fa44"}}>
-          ↻ Refresh
-        </button>
-      </div>
-
-      {/* Latest price bar */}
-      {latest && (
-        <div style={{
-          background:"#161b22",border:`1px solid ${C[latestRegime]}33`,
-          borderRadius:8,padding:"12px 18px",marginBottom:18,
-          display:"flex",gap:28,flexWrap:"wrap",alignItems:"center"
-        }}>
-          <div>
-            <div style={{fontSize:10,color:"#484f58",marginBottom:2}}>LAST CLOSE</div>
-            <div style={{fontSize:22,fontWeight:700}}>${latest.close?.toFixed(2)}</div>
-          </div>
-          <div>
-            <div style={{fontSize:10,color:"#484f58",marginBottom:2}}>CHANGE</div>
-            <div style={{fontSize:14,color:latest.change>=0?"#00d68f":"#ff4d6d",fontWeight:600}}>
-              {latest.changeStr}
-            </div>
-          </div>
-          <div>
-            <div style={{fontSize:10,color:"#484f58",marginBottom:2}}>EMA 20</div>
-            <div style={{fontSize:13,color:"#60a5fa"}}>${latest.ema20?.toFixed(2)}</div>
-          </div>
-          <div>
-            <div style={{fontSize:10,color:"#484f58",marginBottom:2}}>EMA 50</div>
-            <div style={{fontSize:13,color:"#a78bfa"}}>${latest.ema50?.toFixed(2)}</div>
-          </div>
-          <div>
-            <div style={{fontSize:10,color:"#484f58",marginBottom:2}}>ADX (14)</div>
-            <div style={{fontSize:13,color:"#fb923c"}}>{latest.adx?.toFixed(1)}</div>
-          </div>
-          <div style={{marginLeft:"auto"}}>
-            <div style={{fontSize:10,color:"#484f58",marginBottom:2}}>BOT STRATEGY</div>
-            <div style={{fontSize:13,fontWeight:700,color:C[latestRegime]}}>
-              {latestRegime==="BULL"?"Trend Following":latestRegime==="BEAR"?"Hold Cash":"Mean Reversion"}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Stats pills */}
-      <div style={{display:"flex",gap:10,marginBottom:18,flexWrap:"wrap"}}>
-        {[
-          {label:"🐂 BULL",count:stats.BULL,color:"#00d68f",strategy:"Trend Following"},
-          {label:"🐻 BEAR",count:stats.BEAR,color:"#ff4d6d",strategy:"Hold Cash"},
-          {label:"〰️ CHOPPY",count:stats.CHOPPY,color:"#f0a500",strategy:"Mean Reversion"},
-        ].map(s=>(
-          <div key={s.label} style={{
-            background:s.color+"12",border:`1px solid ${s.color}30`,
-            borderRadius:8,padding:"8px 14px",flex:"1",minWidth:130
-          }}>
-            <div style={{fontSize:10,color:"#484f58",marginBottom:2}}>{s.label}</div>
-            <div style={{fontSize:18,fontWeight:700,color:s.color}}>{s.count} <span style={{fontSize:11,fontWeight:400}}>days</span></div>
-            <div style={{fontSize:10,color:"#484f58"}}>
-              {stats.total?Math.round(s.count/stats.total*100):0}% · {s.strategy}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Controls */}
-      <div style={{display:"flex",gap:6,marginBottom:16,flexWrap:"wrap",alignItems:"center"}}>
-        <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-          {years.map(y=><button key={y} style={btn(yearF===y)} onClick={()=>setYearF(y)}>{y}</button>)}
-        </div>
-        <div style={{display:"flex",gap:5,marginLeft:12}}>
-          <button style={btn(view==="price","#60a5fa")} onClick={()=>setView("price")}>Price Chart</button>
-          <button style={btn(view==="regime","#f0a500")} onClick={()=>setView("regime")}>Regime Days</button>
-        </div>
-        <div style={{display:"flex",gap:5,marginLeft:"auto"}}>
-          <button style={btn(gran==="daily")} onClick={()=>setGran("daily")}>Daily</button>
-          <button style={btn(gran==="monthly")} onClick={()=>setGran("monthly")}>Monthly</button>
-        </div>
-      </div>
-
-      {/* Chart */}
-      <div style={{background:"#0d1117",border:"1px solid #21262d",borderRadius:12,padding:"16px 4px 4px"}}>
-        {view==="price" ? (
-          <ResponsiveContainer width="100%" height={420}>
-            <ComposedChart data={displayData} margin={{top:4,right:16,bottom:0,left:0}}>
-              <CartesianGrid strokeDasharray="2 4" stroke="#161b22" vertical={false}/>
-              <XAxis dataKey="date" tick={{fill:"#484f58",fontSize:9}} stroke="#21262d"
-                tickLine={false} interval="preserveStartEnd"
-                tickFormatter={v=>gran==="monthly"?v.slice(0,7):v.slice(5)}/>
-              <YAxis tick={{fill:"#484f58",fontSize:9}} stroke="#21262d" tickLine={false}
-                axisLine={false} tickFormatter={v=>`$${v}`} domain={["auto","auto"]} width={50}/>
-              <Tooltip content={<CustomTooltip/>}/>
-              <Line type="monotone" dataKey="bull"   stroke="#00d68f" strokeWidth={1.5} dot={false} connectNulls={false} name="Bull"/>
-              <Line type="monotone" dataKey="bear"   stroke="#ff4d6d" strokeWidth={1.5} dot={false} connectNulls={false} name="Bear"/>
-              <Line type="monotone" dataKey="choppy" stroke="#f0a500" strokeWidth={1.5} dot={false} connectNulls={false} name="Choppy"/>
-              <Line type="monotone" dataKey="ema20"  stroke="#60a5fa" strokeWidth={1} dot={false} connectNulls strokeDasharray="3 2" name="EMA 20" opacity={0.7}/>
-              <Line type="monotone" dataKey="ema50"  stroke="#a78bfa" strokeWidth={1} dot={false} connectNulls strokeDasharray="3 2" name="EMA 50" opacity={0.7}/>
-              <Legend wrapperStyle={{fontSize:11,paddingTop:10}}
-                formatter={v=><span style={{color:
-                  v==="Bull"?"#00d68f":v==="Bear"?"#ff4d6d":v==="Choppy"?"#f0a500":
-                  v==="EMA 20"?"#60a5fa":"#a78bfa",fontFamily:"inherit"}}>{v}</span>}/>
-            </ComposedChart>
-          </ResponsiveContainer>
-        ) : (
-          <ResponsiveContainer width="100%" height={420}>
-            <ComposedChart data={toMonthly(filtered)} margin={{top:4,right:16,bottom:0,left:0}}>
-              <CartesianGrid strokeDasharray="2 4" stroke="#161b22" vertical={false}/>
-              <XAxis dataKey="date" tick={{fill:"#484f58",fontSize:9}} stroke="#21262d" tickLine={false}/>
-              <YAxis tick={{fill:"#484f58",fontSize:9}} stroke="#21262d" tickLine={false} axisLine={false} width={32}/>
-              <Tooltip contentStyle={{background:"#0d1117",border:"1px solid #30363d",borderRadius:8,fontSize:11}}
-                labelStyle={{color:"#888"}} itemStyle={{fontFamily:"inherit"}}/>
-              <Bar dataKey="bull"   stackId="a" fill="#00d68f" name="🐂 Bull"   maxBarSize={30}/>
-              <Bar dataKey="choppy" stackId="a" fill="#f0a500" name="〰️ Choppy" maxBarSize={30}/>
-              <Bar dataKey="bear"   stackId="a" fill="#ff4d6d" name="🐻 Bear"   maxBarSize={30} radius={[3,3,0,0]}/>
-              <Legend wrapperStyle={{fontSize:11,paddingTop:10}}
-                formatter={v=><span style={{color:
-                  v.includes("Bull")?"#00d68f":v.includes("Choppy")?"#f0a500":"#ff4d6d",
-                  fontFamily:"inherit"}}>{v}</span>}/>
-            </ComposedChart>
-          </ResponsiveContainer>
-        )}
-      </div>
-
-      <div style={{marginTop:12,fontSize:10,color:"#30363d",textAlign:"center"}}>
-        Data: Yahoo Finance · Regime: EMA(20/50) + ADX(14) thresholds matching your bot's regime_detector.py
-      </div>
-    </div>
-  );
+// ── Filter by year ─────────────────────────────────────────────────────────────
+function filtered() {
+  if (currentYear==='ALL') return allData;
+  return allData.filter(d=>d.date.startsWith(currentYear));
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+// ── Build Chart.js datasets ───────────────────────────────────────────────────
+function buildPriceChart(data) {
+  // Colour each point by regime
+  const labels = data.map(d=>d.date);
+  const prices = data.map(d=>d.close);
+  const colors = data.map(d=>C[d.regime]||'#444');
+
+  return {
+    labels,
+    datasets: [
+      {
+        label: 'SPY',
+        data: prices,
+        segment: {
+          borderColor: ctx => {
+            const d = data[ctx.p1DataIndex];
+            return d ? (C[d.regime]||'#444') : '#444';
+          }
+        },
+        borderWidth: 1.5,
+        pointRadius: 0,
+        tension: 0,
+        fill: false,
+        type: 'line',
+        order: 1,
+      },
+      {
+        label: 'EMA 20',
+        data: data.map(d=>d.ema20),
+        borderColor: '#60a5fa',
+        borderWidth: 1,
+        borderDash: [4,3],
+        pointRadius: 0,
+        tension: 0,
+        fill: false,
+        type: 'line',
+        order: 2,
+        spanGaps: true,
+      },
+      {
+        label: 'EMA 50',
+        data: data.map(d=>d.ema50),
+        borderColor: '#a78bfa',
+        borderWidth: 1,
+        borderDash: [4,3],
+        pointRadius: 0,
+        tension: 0,
+        fill: false,
+        type: 'line',
+        order: 3,
+        spanGaps: true,
+      }
+    ]
+  };
+}
+
+function buildRegimeChart(data) {
+  const monthly = toMonthly(data);
+  return {
+    labels: monthly.map(m=>m.date),
+    datasets: [
+      { label:'🐂 Bull',   data:monthly.map(m=>m.bull),   backgroundColor:'#00d68f', stack:'a' },
+      { label:'〰️ Choppy', data:monthly.map(m=>m.choppy), backgroundColor:'#f0a500', stack:'a' },
+      { label:'🐻 Bear',   data:monthly.map(m=>m.bear),   backgroundColor:'#ff4d6d', stack:'a' },
+    ]
+  };
+}
+
+// ── Render chart ──────────────────────────────────────────────────────────────
+function renderChart() {
+  const data = filtered();
+  if (chartInst) { chartInst.destroy(); chartInst=null; }
+
+  const ctx = document.getElementById('chart').getContext('2d');
+  const isPrice = currentView==='price';
+
+  const chartData = isPrice ? buildPriceChart(data) : buildRegimeChart(data);
+
+  chartInst = new Chart(ctx, {
+    type: isPrice ? 'line' : 'bar',
+    data: chartData,
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      animation: { duration: 300 },
+      interaction: { mode:'index', intersect:false },
+      plugins: {
+        legend: {
+          labels: {
+            color:'#484f58', font:{family:"'Courier New',monospace",size:11},
+            boxWidth:12, padding:16
+          }
+        },
+        tooltip: {
+          backgroundColor:'#0d1117',
+          borderColor: '#30363d',
+          borderWidth:1,
+          titleColor:'#666',
+          bodyColor:'#ccc',
+          titleFont:{family:"'Courier New',monospace",size:11},
+          bodyFont:{family:"'Courier New',monospace",size:11},
+          callbacks: {
+            afterBody: (items) => {
+              if (!isPrice) return;
+              const d = data[items[0].dataIndex];
+              if (!d) return;
+              const icons={BULL:'🐂 BULL',BEAR:'🐻 BEAR',CHOPPY:'〰️ CHOPPY',UNKNOWN:'❓'};
+              const chg=d.change>=0?'+':'';
+              return [
+                `Regime: ${icons[d.regime]||d.regime}`,
+                `Change: ${chg}${d.change.toFixed(2)} (${chg}${d.changePct.toFixed(2)}%)`,
+                d.adx?`ADX: ${d.adx.toFixed(1)}`:'',
+              ].filter(Boolean);
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          ticks: {
+            color:'#484f58',
+            font:{family:"'Courier New',monospace",size:9},
+            maxTicksLimit:12,
+          },
+          grid: { color:'#161b22' }
+        },
+        y: {
+          ticks: {
+            color:'#484f58',
+            font:{family:"'Courier New',monospace",size:9},
+            callback: v => isPrice ? `$${v}` : v,
+          },
+          grid: { color:'#161b22' }
+        }
+      }
+    }
+  });
+}
+
+// ── Update stat cards ─────────────────────────────────────────────────────────
+function updateStats() {
+  const data = filtered();
+  const c={BULL:0,BEAR:0,CHOPPY:0};
+  data.forEach(d=>{if(c[d.regime]!==undefined)c[d.regime]++;});
+  const total=data.length||1;
+  document.getElementById('s-bull').textContent   = c.BULL;
+  document.getElementById('s-bear').textContent   = c.BEAR;
+  document.getElementById('s-choppy').textContent = c.CHOPPY;
+  document.getElementById('s-bull-pct').textContent   = `${Math.round(c.BULL/total*100)}% · Trend Following`;
+  document.getElementById('s-bear-pct').textContent   = `${Math.round(c.BEAR/total*100)}% · Hold Cash`;
+  document.getElementById('s-choppy-pct').textContent = `${Math.round(c.CHOPPY/total*100)}% · Mean Reversion`;
+}
+
+// ── Year buttons ──────────────────────────────────────────────────────────────
+function buildYearBtns() {
+  const years=['ALL',...new Set(allData.map(d=>d.date.slice(0,4)))].sort((a,b)=>a==='ALL'?-1:a.localeCompare(b));
+  const wrap=document.getElementById('year-btns');
+  wrap.innerHTML='';
+  years.forEach(y=>{
+    const b=document.createElement('button');
+    b.textContent=y; b.id='yr-'+y;
+    if(y===currentYear) b.className='active';
+    b.onclick=()=>{ currentYear=y; document.querySelectorAll('.year-btns button').forEach(x=>x.className=''); b.className='active'; updateStats(); renderChart(); };
+    wrap.appendChild(b);
+  });
+}
+
+// ── Top bar ───────────────────────────────────────────────────────────────────
+function updateTopBar() {
+  const latest=allData[allData.length-1];
+  if(!latest) return;
+  const reg=latest.regime;
+  const icons={BULL:'🐂 BULL',BEAR:'🐻 BEAR',CHOPPY:'〰️ CHOPPY'};
+  const pill=document.getElementById('regime-pill');
+  pill.textContent=icons[reg]||reg;
+  pill.style.display='inline-block';
+  pill.style.color=C[reg]; pill.style.borderColor=C[reg]+'66'; pill.style.background=C[reg]+'15';
+  document.getElementById('m-price').textContent=`$${latest.close.toFixed(2)}`;
+  const chg=latest.change,pct=latest.changePct;
+  const chgEl=document.getElementById('m-change');
+  chgEl.textContent=`${chg>=0?'+':''}${chg.toFixed(2)} (${chg>=0?'+':''}${pct.toFixed(2)}%)`;
+  chgEl.style.color=chg>=0?'#00d68f':'#ff4d6d';
+  document.getElementById('m-ema20').textContent=latest.ema20?`$${latest.ema20.toFixed(2)}`:'-';
+  document.getElementById('m-ema50').textContent=latest.ema50?`$${latest.ema50.toFixed(2)}`:'-';
+  document.getElementById('m-adx').textContent=latest.adx?latest.adx.toFixed(1):'-';
+  const strat={BULL:'Trend Following',BEAR:'Hold Cash',CHOPPY:'Mean Reversion'};
+  const sEl=document.getElementById('m-strategy');
+  sEl.textContent=strat[reg]||reg; sEl.style.color=C[reg];
+  document.getElementById('top-bar').style.display='flex';
+  document.getElementById('stats-row').style.display='flex';
+}
+
+// ── View / gran toggles ───────────────────────────────────────────────────────
+function setView(v) {
+  currentView=v;
+  document.getElementById('btn-price').className=v==='price'?'active-blue':'';
+  document.getElementById('btn-regime').className=v==='regime'?'active':'';
+  renderChart();
+}
+function setGran(g) {
+  currentGran=g;
+  document.getElementById('btn-daily').className=g==='daily'?'active':'';
+  document.getElementById('btn-monthly').className=g==='monthly'?'active':'';
+  renderChart();
+}
+
+// ── Main load ─────────────────────────────────────────────────────────────────
+async function loadData() {
+  document.getElementById('loading').style.display='flex';
+  document.getElementById('error-box').style.display='none';
+  try {
+    const rows = await fetchSPY();
+    allData = process(rows);
+    document.getElementById('loading').style.display='none';
+    updateTopBar();
+    buildYearBtns();
+    updateStats();
+    renderChart();
+  } catch(e) {
+    document.getElementById('loading').style.display='none';
+    const eb=document.getElementById('error-box');
+    eb.style.display='block';
+    eb.innerHTML=`
+      <strong>⚠ Could not fetch live SPY data</strong><br><br>
+      ${e.message}<br><br>
+      <strong>Fix options:</strong><br>
+      1. Run locally: <code>python -m http.server 8080</code> then open <code>http://localhost:8080/regime_chart.html</code><br>
+      2. Or try again — Yahoo Finance sometimes temporarily blocks requests<br><br>
+      <button onclick="loadData()" style="color:#00d68f;border-color:#00d68f44;margin-top:8px">↻ Retry</button>
+    `;
+  }
+}
+
+loadData();
 </script>
 </body>
 </html>

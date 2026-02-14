@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SPY Regime Chart</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/recharts/2.8.0/Recharts.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0d1117; color: #e6edf3; font-family: 'JetBrains Mono', 'Courier New', monospace; }
+  ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: #0d1117; }
+  ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+  button:hover { opacity: 0.85; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useMemo, useCallback } = React;
+const { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid,
+        Tooltip, Legend, ResponsiveContainer, Cell } = Recharts;
+
+// ── Regime detection (identical to your bot) ──────────────────────────────────
+function calcEMA(values, period) {
+  const k = 2 / (period + 1);
+  const result = new Array(values.length).fill(null);
+  let sum = 0, count = 0;
+  for (let i = 0; i < values.length; i++) {
+    if (values[i] == null) continue;
+    if (count < period) { sum += values[i]; count++; if (count === period) result[i] = sum / period; }
+    else { result[i] = values[i] * k + result[i-1] * (1-k); }
+  }
+  return result;
+}
+
+function calcADX(highs, lows, closes, period = 14) {
+  const n = closes.length;
+  const result = new Array(n).fill(null);
+  const tr = [], pDM = [], mDM = [];
+  for (let i = 1; i < n; i++) {
+    tr.push(Math.max(highs[i]-lows[i], Math.abs(highs[i]-closes[i-1]), Math.abs(lows[i]-closes[i-1])));
+    const up = highs[i]-highs[i-1], dn = lows[i-1]-lows[i];
+    pDM.push(up > dn && up > 0 ? up : 0);
+    mDM.push(dn > up && dn > 0 ? dn : 0);
+  }
+  function wilder(arr, p) {
+    const out = new Array(arr.length).fill(null);
+    let s = arr.slice(0,p).reduce((a,b)=>a+b,0);
+    out[p-1] = s;
+    for (let i=p;i<arr.length;i++) out[i]=out[i-1]-out[i-1]/p+arr[i];
+    return out;
+  }
+  const sTR=wilder(tr,period), sPDM=wilder(pDM,period), sMDM=wilder(mDM,period);
+  const dx=[];
+  for (let i=period-1;i<sTR.length;i++) {
+    if (!sTR[i]) { dx.push(null); continue; }
+    const pdi=sPDM[i]/sTR[i]*100, mdi=sMDM[i]/sTR[i]*100;
+    dx.push((pdi+mdi)===0 ? 0 : Math.abs(pdi-mdi)/(pdi+mdi)*100);
+  }
+  let av=null, adxArr=[];
+  for (let i=0;i<dx.length;i++) {
+    if (i<period) { adxArr.push(null); continue; }
+    if (av===null) { av=dx.slice(0,period).reduce((a,b)=>a+(b||0),0)/period; adxArr.push(av); }
+    else { av=(av*(period-1)+(dx[i]||0))/period; adxArr.push(av); }
+  }
+  for (let i=0;i<adxArr.length;i++) if (i+1<n) result[i+1]=adxArr[i];
+  return result;
+}
+
+function classifyRegime(close, ema20, ema50, adxVal) {
+  if (!ema20||!ema50||!adxVal) return "UNKNOWN";
+  const pct=(close-ema50)/ema50*100;
+  if (adxVal>25) {
+    if (close>ema20&&close>ema50&&pct>3) return "BULL";
+    if (close<ema20&&close<ema50&&pct<-3) return "BEAR";
+    return "CHOPPY";
+  }
+  return "CHOPPY";
+}
+
+// ── Colours ───────────────────────────────────────────────────────────────────
+const C = { BULL:"#00d68f", BEAR:"#ff4d6d", CHOPPY:"#f0a500", UNKNOWN:"#444" };
+
+// ── Fetch real SPY data via Yahoo Finance proxy ───────────────────────────────
+async function fetchSPY(period = "4y") {
+  // Yahoo Finance v8 chart endpoint (no API key needed)
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/SPY?interval=1d&range=${period}&events=history`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const json = await res.json();
+  const chart = json.chart.result[0];
+  const timestamps = chart.timestamp;
+  const q = chart.indicators.quote[0];
+  const rows = [];
+  for (let i=0;i<timestamps.length;i++) {
+    if (!q.close[i]) continue;
+    const d = new Date(timestamps[i]*1000);
+    rows.push({
+      date: d.toISOString().slice(0,10),
+      open:  +q.open[i].toFixed(2),
+      high:  +q.high[i].toFixed(2),
+      low:   +q.low[i].toFixed(2),
+      close: +q.close[i].toFixed(2),
+      volume: q.volume[i],
+    });
+  }
+  return rows;
+}
+
+// ── Tooltip ───────────────────────────────────────────────────────────────────
+function CustomTooltip({ active, payload }) {
+  if (!active||!payload?.length) return null;
+  const d = payload[0]?.payload;
+  if (!d||!d.regime) return null;
+  const icons = { BULL:"🐂", BEAR:"🐻", CHOPPY:"〰️", UNKNOWN:"❓" };
+  return (
+    <div style={{ background:"#0d1117", border:`1px solid ${C[d.regime]}`, borderRadius:8,
+                  padding:"10px 14px", fontSize:11, minWidth:170 }}>
+      <div style={{color:"#666",marginBottom:5}}>{d.date}</div>
+      <div style={{color:C[d.regime],fontWeight:700,fontSize:13,marginBottom:5}}>
+        {icons[d.regime]} {d.regime}
+      </div>
+      <div style={{color:"#ccc"}}>SPY <strong>${d.close?.toFixed(2)}</strong></div>
+      {d.ema20 && <div style={{color:"#60a5fa"}}>EMA20 ${d.ema20?.toFixed(2)}</div>}
+      {d.ema50 && <div style={{color:"#a78bfa"}}>EMA50 ${d.ema50?.toFixed(2)}</div>}
+      {d.adx   && <div style={{color:"#fb923c"}}>ADX {d.adx?.toFixed(1)}</div>}
+      {d.changeStr && <div style={{color:d.change>=0?"#00d68f":"#ff4d6d",marginTop:3}}>{d.changeStr}</div>}
+    </div>
+  );
+}
+
+// ── Monthly aggregation ───────────────────────────────────────────────────────
+function toMonthly(data) {
+  const m = {};
+  data.forEach(d => {
+    const k = d.date.slice(0,7);
+    if (!m[k]) m[k]={date:k,bull:0,bear:0,choppy:0,close:0,ema20:null,ema50:null};
+    m[k].close=d.close; m[k].ema20=d.ema20; m[k].ema50=d.ema50;
+    if (d.regime==="BULL") m[k].bull++;
+    else if (d.regime==="BEAR") m[k].bear++;
+    else m[k].choppy++;
+  });
+  return Object.values(m).sort((a,b)=>a.date.localeCompare(b.date));
+}
+
+// ── App ───────────────────────────────────────────────────────────────────────
+function App() {
+  const [raw, setRaw]       = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError]   = useState(null);
+  const [view, setView]     = useState("price");
+  const [gran, setGran]     = useState("daily");
+  const [yearF, setYearF]   = useState("ALL");
+  const [lastUpdate, setLastUpdate] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true); setError(null);
+    try {
+      const rows = await fetchSPY("4y");
+      const closes = rows.map(r=>r.close);
+      const highs  = rows.map(r=>r.high);
+      const lows   = rows.map(r=>r.low);
+      const ema20  = calcEMA(closes, 20);
+      const ema50  = calcEMA(closes, 50);
+      const adxArr = calcADX(highs, lows, closes, 14);
+
+      const processed = rows.map((r,i) => {
+        const regime = classifyRegime(r.close, ema20[i], ema50[i], adxArr[i]);
+        const prev = i>0 ? rows[i-1].close : r.close;
+        const change = r.close - prev;
+        return {
+          ...r,
+          regime,
+          ema20: ema20[i] ? +ema20[i].toFixed(2) : null,
+          ema50: ema50[i] ? +ema50[i].toFixed(2) : null,
+          adx:   adxArr[i] ? +adxArr[i].toFixed(1) : null,
+          bull:  regime==="BULL"  ? r.close : null,
+          bear:  regime==="BEAR"  ? r.close : null,
+          choppy:regime==="CHOPPY"? r.close : null,
+          change, changeStr: `${change>=0?"+":""}${change.toFixed(2)} (${(change/prev*100).toFixed(2)}%)`,
+        };
+      });
+      setRaw(processed);
+      setLastUpdate(new Date().toLocaleTimeString("en-AU"));
+    } catch(e) {
+      setError(e.message);
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const filtered = useMemo(()=>{
+    if (yearF==="ALL") return raw;
+    return raw.filter(d=>d.date.startsWith(yearF));
+  },[raw,yearF]);
+
+  const displayData = useMemo(()=>{
+    const base = gran==="monthly" ? toMonthly(filtered) : filtered;
+    if (gran==="daily" && base.length>400) {
+      const step=Math.ceil(base.length/400);
+      return base.filter((_,i)=>i%step===0);
+    }
+    return base;
+  },[filtered,gran]);
+
+  const stats = useMemo(()=>{
+    const c={BULL:0,BEAR:0,CHOPPY:0};
+    filtered.forEach(d=>{if(c[d.regime]!==undefined)c[d.regime]++;});
+    const total=Object.values(c).reduce((a,b)=>a+b,0);
+    const latest=filtered[filtered.length-1];
+    return {...c,total,latest};
+  },[filtered]);
+
+  const years = useMemo(()=>{
+    const ys=new Set(raw.map(d=>d.date.slice(0,4)));
+    return ["ALL",...[...ys].sort()];
+  },[raw]);
+
+  // Styles
+  const btn = (active,color="#f0a500")=>({
+    background: active ? color+"33" : "#161b22",
+    color: active ? color : "#555",
+    border: `1px solid ${active?color:"#21262d"}`,
+    borderRadius:6, padding:"5px 12px", cursor:"pointer",
+    fontFamily:"inherit", fontSize:11, fontWeight:700, transition:"all 0.15s",
+  });
+
+  if (loading) return (
+    <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",flexDirection:"column",gap:16}}>
+      <div style={{fontSize:28,animation:"spin 1s linear infinite"}}>⚙️</div>
+      <div style={{color:"#484f58",fontSize:13}}>Fetching real SPY data from Yahoo Finance...</div>
+      <style>{`@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}`}</style>
+    </div>
+  );
+
+  if (error) return (
+    <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",flexDirection:"column",gap:12}}>
+      <div style={{color:"#ff4d6d",fontSize:16}}>⚠ Could not fetch SPY data</div>
+      <div style={{color:"#484f58",fontSize:12,maxWidth:400,textAlign:"center"}}>{error}</div>
+      <div style={{color:"#484f58",fontSize:11,maxWidth:400,textAlign:"center",marginTop:8}}>
+        Yahoo Finance may be blocking browser requests due to CORS. 
+        Try opening this file in Chrome and disabling CORS, or use the 
+        Python script version instead.
+      </div>
+      <button onClick={load} style={{...btn(true,"#00d68f"),marginTop:8,padding:"8px 20px"}}>Retry</button>
+    </div>
+  );
+
+  const latest = stats.latest;
+  const latestRegime = latest?.regime || "UNKNOWN";
+
+  return (
+    <div style={{minHeight:"100vh",padding:"24px 20px",maxWidth:1200,margin:"0 auto"}}>
+
+      {/* Header */}
+      <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:20,flexWrap:"wrap",gap:12}}>
+        <div>
+          <h1 style={{fontSize:20,fontWeight:700,marginBottom:2,letterSpacing:-0.5}}>
+            SPY Market Regime  
+            <span style={{
+              marginLeft:12, fontSize:12, background:C[latestRegime]+"22",
+              color:C[latestRegime], border:`1px solid ${C[latestRegime]}44`,
+              borderRadius:20, padding:"3px 10px", verticalAlign:"middle"
+            }}>
+              {latestRegime==="BULL"?"🐂 BULL":latestRegime==="BEAR"?"🐻 BEAR":"〰️ CHOPPY"} TODAY
+            </span>
+          </h1>
+          <div style={{fontSize:10,color:"#484f58"}}>
+            Real SPY data · EMA(20/50) + ADX(14) · Same algorithm as your trading bot
+            {lastUpdate && ` · Updated ${lastUpdate}`}
+          </div>
+        </div>
+        <button onClick={load} style={{...btn(false),padding:"7px 16px",color:"#60a5fa",borderColor:"#60a5fa44"}}>
+          ↻ Refresh
+        </button>
+      </div>
+
+      {/* Latest price bar */}
+      {latest && (
+        <div style={{
+          background:"#161b22",border:`1px solid ${C[latestRegime]}33`,
+          borderRadius:8,padding:"12px 18px",marginBottom:18,
+          display:"flex",gap:28,flexWrap:"wrap",alignItems:"center"
+        }}>
+          <div>
+            <div style={{fontSize:10,color:"#484f58",marginBottom:2}}>LAST CLOSE</div>
+            <div style={{fontSize:22,fontWeight:700}}>${latest.close?.toFixed(2)}</div>
+          </div>
+          <div>
+            <div style={{fontSize:10,color:"#484f58",marginBottom:2}}>CHANGE</div>
+            <div style={{fontSize:14,color:latest.change>=0?"#00d68f":"#ff4d6d",fontWeight:600}}>
+              {latest.changeStr}
+            </div>
+          </div>
+          <div>
+            <div style={{fontSize:10,color:"#484f58",marginBottom:2}}>EMA 20</div>
+            <div style={{fontSize:13,color:"#60a5fa"}}>${latest.ema20?.toFixed(2)}</div>
+          </div>
+          <div>
+            <div style={{fontSize:10,color:"#484f58",marginBottom:2}}>EMA 50</div>
+            <div style={{fontSize:13,color:"#a78bfa"}}>${latest.ema50?.toFixed(2)}</div>
+          </div>
+          <div>
+            <div style={{fontSize:10,color:"#484f58",marginBottom:2}}>ADX (14)</div>
+            <div style={{fontSize:13,color:"#fb923c"}}>{latest.adx?.toFixed(1)}</div>
+          </div>
+          <div style={{marginLeft:"auto"}}>
+            <div style={{fontSize:10,color:"#484f58",marginBottom:2}}>BOT STRATEGY</div>
+            <div style={{fontSize:13,fontWeight:700,color:C[latestRegime]}}>
+              {latestRegime==="BULL"?"Trend Following":latestRegime==="BEAR"?"Hold Cash":"Mean Reversion"}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Stats pills */}
+      <div style={{display:"flex",gap:10,marginBottom:18,flexWrap:"wrap"}}>
+        {[
+          {label:"🐂 BULL",count:stats.BULL,color:"#00d68f",strategy:"Trend Following"},
+          {label:"🐻 BEAR",count:stats.BEAR,color:"#ff4d6d",strategy:"Hold Cash"},
+          {label:"〰️ CHOPPY",count:stats.CHOPPY,color:"#f0a500",strategy:"Mean Reversion"},
+        ].map(s=>(
+          <div key={s.label} style={{
+            background:s.color+"12",border:`1px solid ${s.color}30`,
+            borderRadius:8,padding:"8px 14px",flex:"1",minWidth:130
+          }}>
+            <div style={{fontSize:10,color:"#484f58",marginBottom:2}}>{s.label}</div>
+            <div style={{fontSize:18,fontWeight:700,color:s.color}}>{s.count} <span style={{fontSize:11,fontWeight:400}}>days</span></div>
+            <div style={{fontSize:10,color:"#484f58"}}>
+              {stats.total?Math.round(s.count/stats.total*100):0}% · {s.strategy}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Controls */}
+      <div style={{display:"flex",gap:6,marginBottom:16,flexWrap:"wrap",alignItems:"center"}}>
+        <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+          {years.map(y=><button key={y} style={btn(yearF===y)} onClick={()=>setYearF(y)}>{y}</button>)}
+        </div>
+        <div style={{display:"flex",gap:5,marginLeft:12}}>
+          <button style={btn(view==="price","#60a5fa")} onClick={()=>setView("price")}>Price Chart</button>
+          <button style={btn(view==="regime","#f0a500")} onClick={()=>setView("regime")}>Regime Days</button>
+        </div>
+        <div style={{display:"flex",gap:5,marginLeft:"auto"}}>
+          <button style={btn(gran==="daily")} onClick={()=>setGran("daily")}>Daily</button>
+          <button style={btn(gran==="monthly")} onClick={()=>setGran("monthly")}>Monthly</button>
+        </div>
+      </div>
+
+      {/* Chart */}
+      <div style={{background:"#0d1117",border:"1px solid #21262d",borderRadius:12,padding:"16px 4px 4px"}}>
+        {view==="price" ? (
+          <ResponsiveContainer width="100%" height={420}>
+            <ComposedChart data={displayData} margin={{top:4,right:16,bottom:0,left:0}}>
+              <CartesianGrid strokeDasharray="2 4" stroke="#161b22" vertical={false}/>
+              <XAxis dataKey="date" tick={{fill:"#484f58",fontSize:9}} stroke="#21262d"
+                tickLine={false} interval="preserveStartEnd"
+                tickFormatter={v=>gran==="monthly"?v.slice(0,7):v.slice(5)}/>
+              <YAxis tick={{fill:"#484f58",fontSize:9}} stroke="#21262d" tickLine={false}
+                axisLine={false} tickFormatter={v=>`$${v}`} domain={["auto","auto"]} width={50}/>
+              <Tooltip content={<CustomTooltip/>}/>
+              <Line type="monotone" dataKey="bull"   stroke="#00d68f" strokeWidth={1.5} dot={false} connectNulls={false} name="Bull"/>
+              <Line type="monotone" dataKey="bear"   stroke="#ff4d6d" strokeWidth={1.5} dot={false} connectNulls={false} name="Bear"/>
+              <Line type="monotone" dataKey="choppy" stroke="#f0a500" strokeWidth={1.5} dot={false} connectNulls={false} name="Choppy"/>
+              <Line type="monotone" dataKey="ema20"  stroke="#60a5fa" strokeWidth={1} dot={false} connectNulls strokeDasharray="3 2" name="EMA 20" opacity={0.7}/>
+              <Line type="monotone" dataKey="ema50"  stroke="#a78bfa" strokeWidth={1} dot={false} connectNulls strokeDasharray="3 2" name="EMA 50" opacity={0.7}/>
+              <Legend wrapperStyle={{fontSize:11,paddingTop:10}}
+                formatter={v=><span style={{color:
+                  v==="Bull"?"#00d68f":v==="Bear"?"#ff4d6d":v==="Choppy"?"#f0a500":
+                  v==="EMA 20"?"#60a5fa":"#a78bfa",fontFamily:"inherit"}}>{v}</span>}/>
+            </ComposedChart>
+          </ResponsiveContainer>
+        ) : (
+          <ResponsiveContainer width="100%" height={420}>
+            <ComposedChart data={toMonthly(filtered)} margin={{top:4,right:16,bottom:0,left:0}}>
+              <CartesianGrid strokeDasharray="2 4" stroke="#161b22" vertical={false}/>
+              <XAxis dataKey="date" tick={{fill:"#484f58",fontSize:9}} stroke="#21262d" tickLine={false}/>
+              <YAxis tick={{fill:"#484f58",fontSize:9}} stroke="#21262d" tickLine={false} axisLine={false} width={32}/>
+              <Tooltip contentStyle={{background:"#0d1117",border:"1px solid #30363d",borderRadius:8,fontSize:11}}
+                labelStyle={{color:"#888"}} itemStyle={{fontFamily:"inherit"}}/>
+              <Bar dataKey="bull"   stackId="a" fill="#00d68f" name="🐂 Bull"   maxBarSize={30}/>
+              <Bar dataKey="choppy" stackId="a" fill="#f0a500" name="〰️ Choppy" maxBarSize={30}/>
+              <Bar dataKey="bear"   stackId="a" fill="#ff4d6d" name="🐻 Bear"   maxBarSize={30} radius={[3,3,0,0]}/>
+              <Legend wrapperStyle={{fontSize:11,paddingTop:10}}
+                formatter={v=><span style={{color:
+                  v.includes("Bull")?"#00d68f":v.includes("Choppy")?"#f0a500":"#ff4d6d",
+                  fontFamily:"inherit"}}>{v}</span>}/>
+            </ComposedChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+
+      <div style={{marginTop:12,fontSize:10,color:"#30363d",textAlign:"center"}}>
+        Data: Yahoo Finance · Regime: EMA(20/50) + ADX(14) thresholds matching your bot's regime_detector.py
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>

@@ -211,12 +211,26 @@ function calcADX(H,L,C,p=14) {
     else{av=(av*(p-1)+(dx[i]||0))/p; aa.push(av);}
   }
   for(let i=0;i<aa.length;i++) if(i+1<n) res[i+1]=aa[i];
+  // Forward-fill any trailing nulls with last valid ADX value
+  // (last ~p bars sometimes return null due to Wilder smoothing offset)
+  let lastValid=null;
+  for(let i=0;i<res.length;i++){
+    if(res[i]!==null) lastValid=res[i];
+    else if(lastValid!==null) res[i]=lastValid;
+  }
   return res;
 }
 
 function regime(close,e20,e50,adx){
-  if(!e20||!e50||!adx) return 'UNKNOWN';
+  // If ADX unavailable (insufficient history), use EMA position only
+  if(!e20||!e50) return 'UNKNOWN';
   const pct=(close-e50)/e50*100;
+  if(!adx) {
+    // Fallback: classify by price vs EMAs alone (no ADX filter)
+    if(close>e20&&close>e50&&pct>3) return 'BULL';
+    if(close<e20&&close<e50&&pct<-3) return 'BEAR';
+    return 'CHOPPY';
+  }
   if(adx>25){
     if(close>e20&&close>e50&&pct>3) return 'BULL';
     if(close<e20&&close<e50&&pct<-3) return 'BEAR';

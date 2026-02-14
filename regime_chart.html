@@ -142,6 +142,7 @@ canvas { max-height: 400px; }
   <div class="view-btns">
     <button id="btn-price" class="active-blue" onclick="setView('price')">Price Chart</button>
     <button id="btn-regime" onclick="setView('regime')">Regime Days</button>
+    <button id="btn-bb" class="active-green" onclick="toggleBB()" title="Show/hide Bollinger Bands">BB Bands</button>
   </div>
   <div class="gran-btns">
     <button id="btn-daily" class="active" onclick="setGran('daily')">Daily</button>
@@ -276,6 +277,22 @@ async function fetchSPY() {
 }
 
 // ── Process raw rows into chart data ─────────────────────────────────────────
+function calcBB(closes, period=20, mult=2.0) {
+  // Returns {upper, middle, lower} arrays
+  const upper=new Array(closes.length).fill(null);
+  const middle=new Array(closes.length).fill(null);
+  const lower=new Array(closes.length).fill(null);
+  for (let i=period-1; i<closes.length; i++) {
+    const slice = closes.slice(i-period+1, i+1);
+    const mean  = slice.reduce((a,b)=>a+b,0)/period;
+    const std   = Math.sqrt(slice.reduce((a,b)=>a+(b-mean)**2,0)/period);
+    middle[i] = +mean.toFixed(2);
+    upper[i]  = +(mean + mult*std).toFixed(2);
+    lower[i]  = +(mean - mult*std).toFixed(2);
+  }
+  return {upper, middle, lower};
+}
+
 function process(rows) {
   const closes = rows.map(r=>r.close);
   const highs  = rows.map(r=>r.high);
@@ -283,11 +300,13 @@ function process(rows) {
   const e20 = calcEMA(closes,20);
   const e50 = calcEMA(closes,50);
   const adx = calcADX(highs,lows,closes,14);
+  const bb  = calcBB(closes,20,2.0);
   return rows.map((r,i)=>{
     const reg = regime(r.close,e20[i],e50[i],adx[i]);
     const prev = i>0?rows[i-1].close:r.close;
     const chg  = r.close-prev;
     return { ...r, regime:reg, ema20:e20[i], ema50:e50[i], adx:adx[i],
+             bbUpper:bb.upper[i], bbMiddle:bb.middle[i], bbLower:bb.lower[i],
              change:chg, changePct:chg/prev*100 };
   });
 }
@@ -312,60 +331,109 @@ function filtered() {
   return allData.filter(d=>d.date.startsWith(currentYear));
 }
 
+// ── BB visibility toggle ─────────────────────────────────────────────────────
+let showBB = true;
+
 // ── Build Chart.js datasets ───────────────────────────────────────────────────
 function buildPriceChart(data) {
-  // Colour each point by regime
   const labels = data.map(d=>d.date);
   const prices = data.map(d=>d.close);
-  const colors = data.map(d=>C[d.regime]||'#444');
 
-  return {
-    labels,
-    datasets: [
-      {
-        label: 'SPY',
-        data: prices,
-        segment: {
-          borderColor: ctx => {
-            const d = data[ctx.p1DataIndex];
-            return d ? (C[d.regime]||'#444') : '#444';
-          }
-        },
-        borderWidth: 1.5,
-        pointRadius: 0,
-        tension: 0,
-        fill: false,
-        type: 'line',
-        order: 1,
+  const datasets = [
+    // Upper BB — dashed green, fill to lower
+    {
+      label: 'Upper BB',
+      data: data.map(d=>d.bbUpper),
+      borderColor: 'rgba(0,214,143,0.35)',
+      borderWidth: 1,
+      borderDash: [3,3],
+      pointRadius: 0,
+      tension: 0,
+      fill: '+2',  // fill between upper and lower BB
+      backgroundColor: 'rgba(0,214,143,0.04)',
+      type: 'line',
+      order: 5,
+      spanGaps: true,
+      hidden: !showBB,
+    },
+    // Middle BB (= EMA20 / the mean)
+    {
+      label: 'Mid BB (Mean)',
+      data: data.map(d=>d.bbMiddle),
+      borderColor: 'rgba(0,214,143,0.55)',
+      borderWidth: 1,
+      borderDash: [5,3],
+      pointRadius: 0,
+      tension: 0,
+      fill: false,
+      type: 'line',
+      order: 4,
+      spanGaps: true,
+      hidden: !showBB,
+    },
+    // Lower BB — dashed green (buy zone)
+    {
+      label: 'Lower BB',
+      data: data.map(d=>d.bbLower),
+      borderColor: 'rgba(0,214,143,0.35)',
+      borderWidth: 1,
+      borderDash: [3,3],
+      pointRadius: 0,
+      tension: 0,
+      fill: false,
+      type: 'line',
+      order: 5,
+      spanGaps: true,
+      hidden: !showBB,
+    },
+    // SPY price — coloured by regime
+    {
+      label: 'SPY',
+      data: prices,
+      segment: {
+        borderColor: ctx => {
+          const d = data[ctx.p1DataIndex];
+          return d ? (C[d.regime]||'#444') : '#444';
+        }
       },
-      {
-        label: 'EMA 20',
-        data: data.map(d=>d.ema20),
-        borderColor: '#60a5fa',
-        borderWidth: 1,
-        borderDash: [4,3],
-        pointRadius: 0,
-        tension: 0,
-        fill: false,
-        type: 'line',
-        order: 2,
-        spanGaps: true,
-      },
-      {
-        label: 'EMA 50',
-        data: data.map(d=>d.ema50),
-        borderColor: '#a78bfa',
-        borderWidth: 1,
-        borderDash: [4,3],
-        pointRadius: 0,
-        tension: 0,
-        fill: false,
-        type: 'line',
-        order: 3,
-        spanGaps: true,
-      }
-    ]
-  };
+      borderWidth: 2,
+      pointRadius: 0,
+      tension: 0,
+      fill: false,
+      type: 'line',
+      order: 1,
+    },
+    // EMA 20
+    {
+      label: 'EMA 20',
+      data: data.map(d=>d.ema20),
+      borderColor: '#60a5fa',
+      borderWidth: 1,
+      borderDash: [4,3],
+      pointRadius: 0,
+      tension: 0,
+      fill: false,
+      type: 'line',
+      order: 2,
+      spanGaps: true,
+    },
+    // EMA 50
+    {
+      label: 'EMA 50',
+      data: data.map(d=>d.ema50),
+      borderColor: '#a78bfa',
+      borderWidth: 1,
+      borderDash: [4,3],
+      pointRadius: 0,
+      tension: 0,
+      fill: false,
+      type: 'line',
+      order: 3,
+      spanGaps: true,
+    },
+  ];
+
+  return { labels, datasets };
 }
 
 function buildRegimeChart(data) {
@@ -420,11 +488,20 @@ function renderChart() {
               if (!d) return;
               const icons={BULL:'🐂 BULL',BEAR:'🐻 BEAR',CHOPPY:'〰️ CHOPPY',UNKNOWN:'❓'};
               const chg=d.change>=0?'+':'';
-              return [
+              const lines = [
                 `Regime: ${icons[d.regime]||d.regime}`,
                 `Change: ${chg}${d.change.toFixed(2)} (${chg}${d.changePct.toFixed(2)}%)`,
                 d.adx?`ADX: ${d.adx.toFixed(1)}`:'',
-              ].filter(Boolean);
+              ];
+              if (d.bbUpper && showBB) {
+                const pctFromLower = d.bbLower ? ((d.close-d.bbLower)/(d.bbUpper-d.bbLower)*100).toFixed(0) : '';
+                lines.push('─────────────────');
+                lines.push(`Upper BB: $${d.bbUpper}`);
+                lines.push(`Mid BB:   $${d.bbMiddle}  ← mean`);
+                lines.push(`Lower BB: $${d.bbLower}  ← buy zone`);
+                lines.push(`BB position: ${pctFromLower}% from bottom`);
+              }
+              return lines.filter(Boolean);
             }
           }
         }
@@ -516,6 +593,21 @@ function setGran(g) {
   document.getElementById('btn-daily').className=g==='daily'?'active':'';
   document.getElementById('btn-monthly').className=g==='monthly'?'active':'';
   renderChart();
+}
+
+function toggleBB() {
+  showBB = !showBB;
+  const btn = document.getElementById('btn-bb');
+  btn.className = showBB ? 'active-green' : '';
+  // Toggle visibility on existing chart without full re-render
+  if (chartInst) {
+    chartInst.data.datasets.forEach((ds,i) => {
+      if (['Upper BB','Mid BB (Mean)','Lower BB'].includes(ds.label)) {
+        chartInst.setDatasetVisibility(i, showBB);
+      }
+    });
+    chartInst.update();
+  }
 }
 
 // ── Main load ─────────────────────────────────────────────────────────────────

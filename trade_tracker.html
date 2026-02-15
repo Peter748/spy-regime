@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PeterTrade — Trade Tracker</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: #080c10;
+  color: #e2e8f0;
+  font-family: 'Courier New', monospace;
+  min-height: 100vh;
+  padding: 28px 20px;
+}
+
+/* ── Header ── */
+.header { margin-bottom: 28px; }
+.header h1 {
+  font-size: 22px; font-weight: 700; letter-spacing: -0.5px;
+  margin-bottom: 3px;
+}
+.header h1 span { color: #f0a500; }
+.header p { font-size: 11px; color: #4a5568; }
+
+/* ── Summary bar ── */
+.summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px; margin-bottom: 24px;
+}
+.sum-card {
+  border-radius: 8px; padding: 12px 14px;
+  border: 1px solid;
+}
+.sum-card .lbl { font-size: 10px; color: #4a5568; margin-bottom: 4px; }
+.sum-card .val { font-size: 20px; font-weight: 700; }
+.sum-card .sub { font-size: 10px; margin-top: 2px; }
+
+/* ── Go-live bar ── */
+.golive {
+  background: #0d1f0d; border: 1px solid #1a4a1a;
+  border-radius: 8px; padding: 14px 18px;
+  margin-bottom: 24px; display: flex;
+  align-items: center; gap: 16px; flex-wrap: wrap;
+}
+.golive .gl-label { font-size: 11px; color: #4a5568; margin-bottom: 4px; }
+.golive .gl-val   { font-size: 13px; font-weight: 700; }
+.progress-wrap { flex: 1; min-width: 200px; }
+.progress-bar {
+  height: 8px; background: #1a2a1a;
+  border-radius: 4px; overflow: hidden; margin-top: 6px;
+}
+.progress-fill {
+  height: 100%; background: #00d68f;
+  border-radius: 4px; transition: width 0.4s;
+}
+
+/* ── Add trade form ── */
+.add-section {
+  background: #0d1117; border: 1px solid #1e2a3a;
+  border-radius: 10px; padding: 18px; margin-bottom: 24px;
+}
+.add-section h3 {
+  font-size: 12px; color: #4a5568;
+  text-transform: uppercase; letter-spacing: 1px;
+  margin-bottom: 14px;
+}
+.form-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; }
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field label { font-size: 10px; color: #4a5568; }
+.field input, .field select {
+  background: #080c10; border: 1px solid #1e2a3a;
+  color: #e2e8f0; border-radius: 6px;
+  padding: 7px 10px; font-family: 'Courier New', monospace;
+  font-size: 12px; outline: none; width: 100%;
+}
+.field input:focus, .field select:focus { border-color: #f0a500; }
+.field.sym  { width: 80px; }
+.field.price{ width: 100px; }
+.field.date { width: 120px; }
+.field.type { width: 110px; }
+.field.exit { width: 110px; }
+.btn-add {
+  background: #f0a50022; color: #f0a500;
+  border: 1px solid #f0a500; border-radius: 6px;
+  padding: 7px 18px; cursor: pointer;
+  font-family: 'Courier New', monospace;
+  font-size: 12px; font-weight: 700;
+  transition: all 0.15s; white-space: nowrap;
+}
+.btn-add:hover { background: #f0a50033; }
+
+/* ── Cycle sections ── */
+.cycle {
+  background: #0d1117; border: 1px solid #1e2a3a;
+  border-radius: 10px; margin-bottom: 16px; overflow: hidden;
+}
+.cycle-header {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 16px; border-bottom: 1px solid #1e2a3a;
+  cursor: pointer; user-select: none;
+}
+.cycle-header:hover { background: #0f1520; }
+.cycle-num {
+  font-size: 11px; font-weight: 700; color: #4a5568;
+  text-transform: uppercase; letter-spacing: 1px;
+}
+.cycle-badge {
+  font-size: 11px; border-radius: 20px;
+  padding: 2px 10px; border: 1px solid; font-weight: 700;
+}
+.cycle-stats {
+  margin-left: auto; display: flex; gap: 16px;
+  font-size: 11px; color: #4a5568;
+}
+.cycle-stats span { color: #e2e8f0; font-weight: 700; }
+
+/* ── Trade table ── */
+.trade-table { width: 100%; border-collapse: collapse; }
+.trade-table th {
+  font-size: 10px; color: #4a5568; text-align: left;
+  padding: 8px 16px; border-bottom: 1px solid #1e2a3a;
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.trade-table td {
+  padding: 9px 16px; font-size: 12px;
+  border-bottom: 1px solid #0f1520;
+}
+.trade-table tr:last-child td { border-bottom: none; }
+.trade-table tr:hover td { background: #0f1520; }
+
+/* Status badges */
+.badge {
+  display: inline-block; border-radius: 4px;
+  padding: 2px 8px; font-size: 10px; font-weight: 700; border: 1px solid;
+}
+.badge-open   { color: #60a5fa; border-color: #60a5fa44; background: #60a5fa11; }
+.badge-tp     { color: #00d68f; border-color: #00d68f44; background: #00d68f11; }
+.badge-stop   { color: #ff4d6d; border-color: #ff4d6d44; background: #ff4d6d11; }
+.badge-timeout{ color: #f0a500; border-color: #f0a50044; background: #f0a50011; }
+
+.win  { color: #00d68f; font-weight: 700; }
+.loss { color: #ff4d6d; font-weight: 700; }
+.neutral { color: #60a5fa; }
+
+/* Close trade inline */
+.btn-close {
+  background: none; border: 1px solid #1e2a3a;
+  color: #4a5568; border-radius: 4px;
+  padding: 3px 8px; cursor: pointer;
+  font-family: 'Courier New', monospace; font-size: 10px;
+  transition: all 0.1s;
+}
+.btn-close:hover { border-color: #ff4d6d44; color: #ff4d6d; }
+.btn-del {
+  background: none; border: none; color: #2a3a4a;
+  cursor: pointer; font-size: 12px; padding: 2px 6px;
+  transition: color 0.1s;
+}
+.btn-del:hover { color: #ff4d6d; }
+
+/* ── Empty state ── */
+.empty {
+  padding: 24px; text-align: center;
+  font-size: 12px; color: #2a3a4a;
+}
+
+/* ── Close modal ── */
+.modal-overlay {
+  display: none; position: fixed; inset: 0;
+  background: rgba(0,0,0,0.7); z-index: 100;
+  align-items: center; justify-content: center;
+}
+.modal-overlay.show { display: flex; }
+.modal {
+  background: #0d1117; border: 1px solid #1e2a3a;
+  border-radius: 12px; padding: 24px; width: 340px;
+}
+.modal h3 { font-size: 14px; margin-bottom: 16px; color: #f0a500; }
+.modal .field { margin-bottom: 12px; }
+.modal .field input, .modal .field select { width: 100%; }
+.modal-btns { display: flex; gap: 8px; margin-top: 16px; }
+.btn-confirm {
+  flex: 1; background: #00d68f22; color: #00d68f;
+  border: 1px solid #00d68f; border-radius: 6px;
+  padding: 8px; cursor: pointer;
+  font-family: 'Courier New', monospace; font-size: 12px; font-weight: 700;
+}
+.btn-cancel {
+  flex: 1; background: transparent; color: #4a5568;
+  border: 1px solid #1e2a3a; border-radius: 6px;
+  padding: 8px; cursor: pointer;
+  font-family: 'Courier New', monospace; font-size: 12px;
+}
+
+/* ── Cycle definition note ── */
+.cycle-note {
+  background: #0d1117; border: 1px solid #1e2a3a;
+  border-radius: 8px; padding: 14px 18px;
+  margin-bottom: 20px; font-size: 11px; color: #4a5568;
+  line-height: 1.8;
+}
+.cycle-note strong { color: #f0a500; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Peter<span>Trade</span> Pro — Trade Tracker</h1>
+  <p>Paper trading journal · Tracks cycles automatically · Go-live decision support</p>
+</div>
+
+<!-- Cycle definition -->
+<div class="cycle-note">
+  <strong>How cycles work here:</strong>
+  A new cycle starts when the previous cycle has at least 3 closed trades.
+  Stocks don't all close at once — that's fine. The tracker groups them for you automatically.
+  <strong>Go-live trigger:</strong> 3 cycles completed with overall P&L positive.
+</div>
+
+<!-- Summary -->
+<div class="summary" id="summary"></div>
+
+<!-- Go-live progress -->
+<div class="golive" id="golive"></div>
+
+<!-- Add trade -->
+<div class="add-section">
+  <h3>+ Log New Buy</h3>
+  <div class="form-row">
+    <div class="field sym">
+      <label>Symbol</label>
+      <input id="f-sym" placeholder="AMD" maxlength="6" style="text-transform:uppercase">
+    </div>
+    <div class="field price">
+      <label>Entry $</label>
+      <input id="f-entry" type="number" placeholder="206.32" step="0.01">
+    </div>
+    <div class="field price">
+      <label>Stop $</label>
+      <input id="f-stop" type="number" placeholder="186.39" step="0.01">
+    </div>
+    <div class="field price">
+      <label>TP $</label>
+      <input id="f-tp" type="number" placeholder="273.58" step="0.01">
+    </div>
+    <div class="field date">
+      <label>Entry Date</label>
+      <input id="f-date" type="date">
+    </div>
+    <div class="field type">
+      <label>Strategy</label>
+      <select id="f-strat">
+        <option value="MEAN_REVERSION">Mean Reversion</option>
+        <option value="TREND_FOLLOWING">Trend Following</option>
+      </select>
+    </div>
+    <button class="btn-add" onclick="addTrade()">+ Add Trade</button>
+  </div>
+</div>
+
+<!-- Cycles -->
+<div id="cycles-container"></div>
+
+<!-- Close modal -->
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <h3>Close Trade</h3>
+    <div class="field">
+      <label>Exit Price $</label>
+      <input id="m-exit" type="number" step="0.01" placeholder="273.58">
+    </div>
+    <div class="field">
+      <label>Exit Date</label>
+      <input id="m-date" type="date">
+    </div>
+    <div class="field">
+      <label>Exit Reason</label>
+      <select id="m-reason">
+        <option value="TP">🎯 Take Profit hit</option>
+        <option value="STOP">🛑 Stop Loss hit</option>
+        <option value="TIMEOUT">⏰ 7-day Timeout</option>
+        <option value="MANUAL">✋ Manual Exit</option>
+      </select>
+    </div>
+    <div class="modal-btns">
+      <button class="btn-confirm" onclick="confirmClose()">Confirm Close</button>
+      <button class="btn-cancel" onclick="closeModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Storage ───────────────────────────────────────────────────────────────────
+const STORE_KEY = 'petertrade_trades_v1';
+
+function load() {
+  try { return JSON.parse(localStorage.getItem(STORE_KEY)) || []; }
+  catch { return []; }
+}
+function save(trades) {
+  localStorage.setItem(STORE_KEY, JSON.stringify(trades));
+}
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let trades = load();
+let closingId = null;
+let collapsedCycles = new Set();
+
+// ── Seed with your existing 5 positions ──────────────────────────────────────
+function seedInitialTrades() {
+  if (trades.length > 0) return; // already have data
+  const initial = [
+    { sym:'AMD',  entry:206.32, stop:186.39, tp:273.58, entryDate:'2026-02-12', strategy:'MEAN_REVERSION' },
+    { sym:'CRWD', entry:412.59, stop:372.69, tp:488.02, entryDate:'2026-02-12', strategy:'MEAN_REVERSION' },
+    { sym:'PANW', entry:161.22, stop:149.43, tp:195.02, entryDate:'2026-02-12', strategy:'MEAN_REVERSION' },
+    { sym:'MELI', entry:2028.23,stop:1884.31,tp:2285.06,entryDate:'2026-02-12', strategy:'MEAN_REVERSION' },
+    { sym:'ABNB', entry:116.78, stop:110.82, tp:139.06, entryDate:'2026-02-12', strategy:'MEAN_REVERSION' },
+  ];
+  trades = initial.map((t,i) => ({
+    id: Date.now() + i,
+    ...t,
+    status: 'OPEN',
+    exitPrice: null, exitDate: null, exitReason: null,
+    pnlPct: null,
+  }));
+  save(trades);
+}
+
+// ── Cycle grouping ────────────────────────────────────────────────────────────
+// A cycle = group of trades. New cycle starts when previous has 3+ closed trades.
+function groupIntoCycles(trades) {
+  if (!trades.length) return [];
+  
+  // Sort by entry date
+  const sorted = [...trades].sort((a,b) => a.entryDate.localeCompare(b.entryDate));
+  
+  const cycles = [];
+  let current = [];
+  
+  for (const t of sorted) {
+    current.push(t);
+    // Start new cycle when current has 5 trades (a full round)
+    // OR when current has 3+ closed trades and a new buy comes in
+    // after the first close
+    const closed = current.filter(x => x.status !== 'OPEN');
+    const firstClose = closed.length ? closed.sort((a,b)=>a.exitDate?.localeCompare(b.exitDate))[0].exitDate : null;
+    
+    if (current.length >= 5 && closed.length >= 3) {
+      // Check if there's a trade entered after the first close
+      const lateEntries = current.filter(x => firstClose && x.entryDate > firstClose);
+      if (lateEntries.length > 0) {
+        // Split: everything before/at first close belongs to this cycle
+        const thisCycle = current.filter(x => !lateEntries.includes(x));
+        if (thisCycle.length) cycles.push(thisCycle);
+        current = [...lateEntries];
+      }
+    }
+  }
+  
+  if (current.length) cycles.push(current);
+  return cycles;
+}
+
+// ── Cycle stats ───────────────────────────────────────────────────────────────
+function cycleStats(trades) {
+  const closed = trades.filter(t => t.status !== 'OPEN');
+  const wins   = closed.filter(t => t.pnlPct > 0);
+  const losses = closed.filter(t => t.pnlPct <= 0);
+  const totalPnl = closed.reduce((s,t) => s + (t.pnlPct||0), 0);
+  const avgPnl   = closed.length ? totalPnl / closed.length : 0;
+  const complete = closed.length === trades.length;
+  const winRate  = closed.length ? Math.round(wins.length / closed.length * 100) : null;
+  return { closed: closed.length, open: trades.filter(t=>t.status==='OPEN').length,
+           wins: wins.length, losses: losses.length, total: trades.length,
+           totalPnl, avgPnl, complete, winRate };
+}
+
+// ── Overall stats ─────────────────────────────────────────────────────────────
+function overallStats() {
+  const allClosed = trades.filter(t => t.status !== 'OPEN');
+  const wins   = allClosed.filter(t => t.pnlPct > 0).length;
+  const totalPnl = allClosed.reduce((s,t) => s + (t.pnlPct||0), 0);
+  const winRate  = allClosed.length ? Math.round(wins / allClosed.length * 100) : 0;
+  const avgPnl   = allClosed.length ? totalPnl / allClosed.length : 0;
+  const cycles   = groupIntoCycles(trades);
+  const completeCycles = cycles.filter(c => {
+    const s = cycleStats(c);
+    return s.complete;
+  }).length;
+  const profitableCycles = cycles.filter(c => {
+    const s = cycleStats(c);
+    return s.complete && s.totalPnl > 0;
+  }).length;
+  return { total: trades.length, closed: allClosed.length, open: trades.filter(t=>t.status==='OPEN').length,
+           wins, winRate, totalPnl, avgPnl, completeCycles, profitableCycles,
+           totalCycles: cycles.length };
+}
+
+// ── Render ────────────────────────────────────────────────────────────────────
+function render() {
+  renderSummary();
+  renderGoLive();
+  renderCycles();
+}
+
+function renderSummary() {
+  const s = overallStats();
+  const pnlColor = s.totalPnl >= 0 ? '#00d68f' : '#ff4d6d';
+  document.getElementById('summary').innerHTML = `
+    <div class="sum-card" style="background:#00d68f12;border-color:#00d68f30">
+      <div class="lbl">TOTAL TRADES</div>
+      <div class="val" style="color:#e2e8f0">${s.total}</div>
+      <div class="sub" style="color:#4a5568">${s.open} open · ${s.closed} closed</div>
+    </div>
+    <div class="sum-card" style="background:#00d68f12;border-color:#00d68f30">
+      <div class="lbl">WIN RATE</div>
+      <div class="val" style="color:#00d68f">${s.closed ? s.winRate+'%' : '—'}</div>
+      <div class="sub" style="color:#4a5568">${s.wins}W · ${s.closed-s.wins}L · target >50%</div>
+    </div>
+    <div class="sum-card" style="background:${s.totalPnl>=0?'#00d68f':'#ff4d6d'}12;border-color:${s.totalPnl>=0?'#00d68f':'#ff4d6d'}30">
+      <div class="lbl">TOTAL P&L</div>
+      <div class="val" style="color:${pnlColor}">${s.totalPnl>=0?'+':''}${s.totalPnl.toFixed(1)}%</div>
+      <div class="sub" style="color:#4a5568">avg ${s.avgPnl>=0?'+':''}${s.avgPnl.toFixed(1)}% per trade</div>
+    </div>
+    <div class="sum-card" style="background:#f0a50012;border-color:#f0a50030">
+      <div class="lbl">CYCLES DONE</div>
+      <div class="val" style="color:#f0a500">${s.completeCycles} / 3</div>
+      <div class="sub" style="color:#4a5568">${s.profitableCycles} profitable</div>
+    </div>
+  `;
+}
+
+function renderGoLive() {
+  const s = overallStats();
+  const pct = Math.min(100, Math.round(s.completeCycles / 3 * 100));
+  const ready = s.completeCycles >= 3 && s.totalPnl > 0;
+  const allClosed = trades.filter(t=>t.status!=='OPEN');
+  const winRate = allClosed.length ? Math.round(trades.filter(t=>t.pnlPct>0).length/allClosed.length*100) : 0;
+  
+  let status, statusColor;
+  if (ready) {
+    status = '🚀 GO LIVE CRITERIA MET'; statusColor = '#00d68f';
+  } else if (s.completeCycles >= 3 && s.totalPnl <= 0) {
+    status = '⚠ 3 cycles done but P&L negative — review before going live'; statusColor = '#ff4d6d';
+  } else {
+    status = `⏳ ${3 - s.completeCycles} more complete cycle${3-s.completeCycles!==1?'s':''} needed`; statusColor = '#f0a500';
+  }
+
+  document.getElementById('golive').innerHTML = `
+    <div>
+      <div class="gl-label">GO-LIVE STATUS</div>
+      <div class="gl-val" style="color:${statusColor}">${status}</div>
+    </div>
+    <div class="progress-wrap">
+      <div class="gl-label">Progress: ${s.completeCycles}/3 cycles · ${winRate}% win rate · ${s.totalPnl>=0?'+':''}${s.totalPnl.toFixed(1)}% total P&L</div>
+      <div class="progress-bar">
+        <div class="progress-fill" style="width:${pct}%;background:${ready?'#00d68f':s.totalPnl<0?'#ff4d6d':'#f0a500'}"></div>
+      </div>
+    </div>
+  `;
+}
+
+function renderCycles() {
+  const cycles = groupIntoCycles(trades);
+  const container = document.getElementById('cycles-container');
+  
+  if (!cycles.length) {
+    container.innerHTML = '<div class="empty">No trades logged yet. Add your first trade above.</div>';
+    return;
+  }
+  
+  container.innerHTML = cycles.map((cycleTrades, ci) => {
+    const s = cycleStats(cycleTrades);
+    const num = ci + 1;
+    const collapsed = collapsedCycles.has(num);
+    
+    // Cycle status
+    let badgeClass, badgeText;
+    if (!s.complete) {
+      badgeClass = 'badge-open'; badgeText = '● IN PROGRESS';
+    } else if (s.totalPnl > 0) {
+      badgeClass = 'badge-tp'; badgeText = '✓ COMPLETE — PROFITABLE';
+    } else {
+      badgeClass = 'badge-stop'; badgeText = '✗ COMPLETE — LOSS';
+    }
+
+    const pnlColor = s.totalPnl >= 0 ? '#00d68f' : '#ff4d6d';
+
+    const rows = cycleTrades
+      .sort((a,b) => a.entryDate.localeCompare(b.entryDate))
+      .map(t => {
+        const pnlStr = t.pnlPct !== null
+          ? `<span class="${t.pnlPct>=0?'win':'loss'}">${t.pnlPct>=0?'+':''}${t.pnlPct.toFixed(1)}%</span>`
+          : '<span class="neutral">open</span>';
+        
+        const daysHeld = t.exitDate
+          ? Math.round((new Date(t.exitDate)-new Date(t.entryDate))/86400000)
+          : Math.round((new Date()-new Date(t.entryDate))/86400000);
+
+        const exitInfo = t.status !== 'OPEN'
+          ? `$${t.exitPrice?.toFixed(2)} <span style="color:#4a5568;font-size:10px">(${t.exitDate})</span>`
+          : `<span style="color:#4a5568">TP $${t.tp} / Stop $${t.stop}</span>`;
+
+        const reasonBadge = {
+          'OPEN':    '<span class="badge badge-open">OPEN</span>',
+          'TP':      '<span class="badge badge-tp">🎯 TP</span>',
+          'STOP':    '<span class="badge badge-stop">🛑 STOP</span>',
+          'TIMEOUT': '<span class="badge badge-timeout">⏰ TIME</span>',
+          'MANUAL':  '<span class="badge badge-timeout">✋ MANUAL</span>',
+        }[t.status] || '';
+
+        const closeBtn = t.status === 'OPEN'
+          ? `<button class="btn-close" onclick="openCloseModal(${t.id})">Close</button>`
+          : '';
+
+        return `
+          <tr>
+            <td><strong>${t.sym}</strong></td>
+            <td>$${t.entry.toFixed(2)}</td>
+            <td>${t.entryDate}</td>
+            <td>${exitInfo}</td>
+            <td>${reasonBadge}</td>
+            <td>${pnlStr}</td>
+            <td style="color:#4a5568">${daysHeld}d</td>
+            <td>${closeBtn} <button class="btn-del" onclick="deleteTrade(${t.id})" title="Delete">×</button></td>
+          </tr>`;
+      }).join('');
+
+    return `
+      <div class="cycle">
+        <div class="cycle-header" onclick="toggleCycle(${num})">
+          <span class="cycle-num">Cycle ${num}</span>
+          <span class="badge ${badgeClass}">${badgeText}</span>
+          <div class="cycle-stats">
+            <div>${s.closed}/${s.total} closed</div>
+            ${s.closed ? `<div>Win: <span style="color:${s.winRate>=50?'#00d68f':'#ff4d6d'}">${s.winRate}%</span></div>` : ''}
+            ${s.closed ? `<div>P&L: <span style="color:${s.totalPnl>=0?'#00d68f':'#ff4d6d'}">${s.totalPnl>=0?'+':''}${s.totalPnl.toFixed(1)}%</span></div>` : ''}
+            <span style="color:#2a3a4a">${collapsed?'▼':'▲'}</span>
+          </div>
+        </div>
+        ${collapsed ? '' : `
+          <table class="trade-table">
+            <thead>
+              <tr>
+                <th>Symbol</th>
+                <th>Entry</th>
+                <th>Entry Date</th>
+                <th>Exit / Targets</th>
+                <th>Status</th>
+                <th>P&L %</th>
+                <th>Days</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        `}
+      </div>`;
+  }).join('');
+}
+
+// ── Actions ───────────────────────────────────────────────────────────────────
+function addTrade() {
+  const sym   = document.getElementById('f-sym').value.trim().toUpperCase();
+  const entry = parseFloat(document.getElementById('f-entry').value);
+  const stop  = parseFloat(document.getElementById('f-stop').value);
+  const tp    = parseFloat(document.getElementById('f-tp').value);
+  const date  = document.getElementById('f-date').value;
+  const strat = document.getElementById('f-strat').value;
+
+  if (!sym || !entry || !date) {
+    alert('Please fill in: Symbol, Entry Price, and Entry Date');
+    return;
+  }
+
+  trades.push({
+    id: Date.now(),
+    sym, entry, stop: stop||null, tp: tp||null,
+    entryDate: date, strategy: strat,
+    status: 'OPEN',
+    exitPrice: null, exitDate: null, exitReason: null, pnlPct: null,
+  });
+  save(trades);
+
+  // Clear form
+  document.getElementById('f-sym').value = '';
+  document.getElementById('f-entry').value = '';
+  document.getElementById('f-stop').value = '';
+  document.getElementById('f-tp').value = '';
+
+  render();
+}
+
+function openCloseModal(id) {
+  closingId = id;
+  document.getElementById('m-date').value = new Date().toISOString().slice(0,10);
+  document.getElementById('m-exit').value = '';
+  document.getElementById('modal').classList.add('show');
+}
+
+function closeModal() {
+  document.getElementById('modal').classList.remove('show');
+  closingId = null;
+}
+
+function confirmClose() {
+  const exitPrice = parseFloat(document.getElementById('m-exit').value);
+  const exitDate  = document.getElementById('m-date').value;
+  const reason    = document.getElementById('m-reason').value;
+
+  if (!exitPrice || !exitDate) { alert('Please enter exit price and date'); return; }
+
+  const t = trades.find(x => x.id === closingId);
+  if (!t) return;
+
+  t.exitPrice  = exitPrice;
+  t.exitDate   = exitDate;
+  t.exitReason = reason;
+  t.status     = reason;
+  t.pnlPct     = (exitPrice - t.entry) / t.entry * 100;
+
+  save(trades);
+  closeModal();
+  render();
+}
+
+function deleteTrade(id) {
+  if (!confirm('Delete this trade?')) return;
+  trades = trades.filter(t => t.id !== id);
+  save(trades);
+  render();
+}
+
+function toggleCycle(num) {
+  if (collapsedCycles.has(num)) collapsedCycles.delete(num);
+  else collapsedCycles.add(num);
+  render();
+}
+
+// ── Set today's date as default ───────────────────────────────────────────────
+document.getElementById('f-date').value = new Date().toISOString().slice(0,10);
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+seedInitialTrades();
+render();
+</script>
+</body>
+</html>
